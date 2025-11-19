@@ -1,15 +1,13 @@
 blueprint:
-  name: Presence Light with Dual Manual Overrides (Tuya RD24G01 Optimized)
+  name: Presence Light with Dual Manual Overrides + Stabilization (Tuya RD24G01)
   description: >
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
     Includes presence stabilization to prevent flicker.
     Optional disable sensor stops automation entirely.
-
   domain: automation
 
   input:
-
     presence_sensor:
       name: Tuya RD24G01 Presence Sensor
       selector:
@@ -34,14 +32,12 @@ blueprint:
 
     manual_on_override_flag:
       name: Manual ON Override Boolean Helper
-      description: "Tracks if manual ON override is active."
       selector:
         entity:
           domain: input_boolean
 
     manual_off_override_flag:
       name: Manual OFF Override Boolean Helper
-      description: "Tracks if manual OFF override is active."
       selector:
         entity:
           domain: input_boolean
@@ -66,44 +62,43 @@ blueprint:
 
     disable_sensor:
       name: Optional Disable Sensor
-      description: "If ON, automation is disabled."
+      description: If ON, automation is disabled.
       default: ""
       selector:
         entity:
           domain: binary_sensor
 
+    presence_on_stable:
+      name: Presence ON Stabilization (HH:MM:SS)
+      default: "00:00:01"
+      selector:
+        text: {}
+
+    presence_off_stable:
+      name: Presence OFF Stabilization (HH:MM:SS)
+      default: "00:00:08"
+      selector:
+        text: {}
 
 trigger:
   - platform: state
     entity_id: !input presence_sensor
-
   - platform: state
     entity_id: !input target_lights
 
-
-variables:
-  sensor: !input presence_sensor
-  lights: !input target_lights
-  off_delay: !input off_delay
-
-  disable_sensor: !input disable_sensor
-
-  on_flag: !input manual_on_override_flag
-  off_flag: !input manual_off_override_flag
-
-  on_minutes: !input manual_on_minutes
-  off_minutes: !input manual_off_minutes
-
-  active_states: ['motion', 'stationary']
-
-  presence_on_stable: "00:00:00.5"
-  presence_off_stable: "00:00:08"
-
-
-condition: []
-
-
 action:
+  - variables:
+      sensor: !input presence_sensor
+      lights: !input target_lights
+      off_delay: !input off_delay
+      on_flag: !input manual_on_override_flag
+      off_flag: !input manual_off_override_flag
+      on_minutes: !input manual_on_minutes
+      off_minutes: !input manual_off_minutes
+      disable_sensor: !input disable_sensor
+      active_states: ["motion", "stationary"]
+      presence_on_stable: !input presence_on_stable
+      presence_off_stable: !input presence_off_stable
 
   ###########################################################################
   # 1 — Optional disable sensor
@@ -112,10 +107,9 @@ action:
       - conditions:
           - condition: template
             value_template: >
-              {{ disable_sensor|length > 0 and is_state(disable_sensor, 'on') }}
+              {{ disable_sensor != "" and is_state(disable_sensor, 'on') }}
         sequence:
-          - stop: "Automation disabled via disable_sensor."
-
+          - stop:
 
   ###########################################################################
   # 2 — Manual ON override
@@ -129,20 +123,19 @@ action:
                  and trigger.to_state.context.user_id is not none }}
         sequence:
           - service: input_boolean.turn_on
-            target: { entity_id: "{{ on_flag }}" }
-
-          # Wait for presence to return to none
+            target:
+              entity_id: !input manual_on_override_flag
           - wait_for_trigger:
               - platform: state
-                entity_id: "{{ sensor }}"
+                entity_id: !input presence_sensor
                 to: "none"
-                for: "{{ presence_off_stable }}"
+                for: !input presence_off_stable
           - delay:
-              minutes: "{{ on_minutes }}"
+              minutes: !input manual_on_minutes
           - service: input_boolean.turn_off
-            target: { entity_id: "{{ on_flag }}" }
-          - stop: "Manual ON override active."
-
+            target:
+              entity_id: !input manual_on_override_flag
+          - stop:
 
   ###########################################################################
   # 3 — Manual OFF override
@@ -156,23 +149,22 @@ action:
                  and trigger.to_state.context.user_id is not none }}
         sequence:
           - service: input_boolean.turn_on
-            target: { entity_id: "{{ off_flag }}" }
-
-          # Wait for presence to return to none
+            target:
+              entity_id: !input manual_off_override_flag
           - wait_for_trigger:
               - platform: state
-                entity_id: "{{ sensor }}"
+                entity_id: !input presence_sensor
                 to: "none"
-                for: "{{ presence_off_stable }}"
+                for: !input presence_off_stable
           - delay:
-              minutes: "{{ off_minutes }}"
+              minutes: !input manual_off_minutes
           - service: input_boolean.turn_off
-            target: { entity_id: "{{ off_flag }}" }
-          - stop: "Manual OFF override active."
-
+            target:
+              entity_id: !input manual_off_override_flag
+          - stop:
 
   ###########################################################################
-  # 4 — Auto ON (blocked by OFF override)
+  # 4 — Auto ON (blocked by OFF override, with presence stabilization)
   ###########################################################################
   - choose:
       - conditions:
@@ -183,13 +175,19 @@ action:
                  and trigger.from_state.state == 'none'
                  and trigger.to_state.state in active_states }}
         sequence:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input presence_sensor
+                to:
+                  - "motion"
+                  - "stationary"
+                for: !input presence_on_stable
           - service: light.turn_on
             target:
               entity_id: !input target_lights
 
-
   ###########################################################################
-  # 5 — Auto OFF (blocked by ON override)
+  # 5 — Auto OFF (blocked by ON override, with presence stabilization)
   ###########################################################################
   - choose:
       - conditions:
@@ -198,16 +196,21 @@ action:
               {{ is_state(on_flag, 'off')
                  and trigger.entity_id == sensor
                  and trigger.to_state.state == 'none'
-                 and (states(sensor) not in active_states) }}
+                 and states(sensor) not in active_states }}
         sequence:
-          - delay: "{{ off_delay }}"
-          - condition: template
-            value_template: "{{ states(sensor) == 'none' }}"
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input presence_sensor
+                to: "none"
+                for: !input presence_off_stable
+          - delay:
+              seconds: !input off_delay
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "none"
           - service: light.turn_off
             target:
               entity_id: !input target_lights
 
-
 mode: queued
 max: 20
-
