@@ -1,0 +1,201 @@
+blueprint:
+  name: Charging + Time Window Helper (Robust with Grace Period & Charging Type)
+  description: >
+    Toggles a boolean helper when one or more selected devices are charging
+    and the current time is between a configurable start time and the next alarm
+    of a selected device.
+    Supports a grace period and filtering by charging type (wired/wireless).
+
+  domain: automation
+
+  input:
+
+    charging_devices:
+      name: Devices to Monitor
+      description: "Select devices to check for charging state."
+      selector:
+        entity:
+          domain: device_tracker
+          multiple: true
+
+    charging_attribute:
+      name: Charging Attribute
+      description: "Attribute that indicates charging state, usually 'battery_charging'."
+      default: battery_charging
+      selector:
+        text: {}
+
+    charging_type_attribute:
+      name: Charging Type Attribute
+      description: "Attribute that indicates type of charging, e.g., 'charging_type'."
+      default: charging_type
+      selector:
+        text: {}
+
+    charging_type_filter:
+      name: Charging Type Filter
+      description: "Select charging type to consider for helper (any, wired, wireless)."
+      default: any
+      selector:
+        select:
+          options:
+            - value: any
+              label: Any
+            - value: wired
+              label: Wired
+            - value: wireless
+              label: Wireless
+
+    grace_period:
+      name: Grace Period (minutes)
+      description: "Number of minutes charging condition must be true continuously before setting helper."
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: minutes
+
+    start_time:
+      name: Start Time
+      description: "Time of day to start evaluating the condition."
+      default: "00:30"
+      selector:
+        time: {}
+
+    alarm_device:
+      name: Device With Next Alarm
+      description: "Select device whose next alarm will define the end of the time window."
+      selector:
+        entity:
+          domain: sensor
+
+    helper_boolean:
+      name: Helper Boolean
+      description: "Boolean helper to toggle ON/OFF based on conditions."
+      selector:
+        entity:
+          domain: input_boolean
+
+  trigger:
+    # Trigger on any charging device state change
+    - platform: state
+      entity_id: !input charging_devices
+
+    # Trigger on time (every minute to check window)
+    - platform: time_pattern
+      minutes: "/1"
+
+    # Trigger when alarm sensor changes (next alarm)
+    - platform: state
+      entity_id: !input alarm_device
+
+  variables:
+    devices: !input charging_devices
+    charge_attr: !input charging_attribute
+    type_attr: !input charging_type_attribute
+    type_filter: !input charging_type_filter
+    start: !input start_time
+    alarm: !input alarm_device
+    helper: !input helper_boolean
+    grace: !input grace_period
+
+  condition: []
+
+  action:
+    - variables:
+        # Find devices currently charging and matching type
+        matching_devices: >
+          {% set list = [] %}
+          {% for dev in devices %}
+            {% set state = state_attr(dev, charge_attr) %}
+            {% set state_bool = state in [true, 'true', 'on'] %}
+            {% set ctype = state_attr(dev, type_attr) %}
+            {% if state_bool %}
+              {% if type_filter == 'any' or (ctype is not none and ctype|lower == type_filter) %}
+                {% set _ = list.append(dev) %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ list }}
+
+        any_charging: "{{ matching_devices|length > 0 }}"
+
+        # Compute next alarm datetime
+        next_alarm: >
+          {% set alarm_val = states(alarm).state %}
+          {% if alarm_val not in ['', 'unknown', 'unavailable'] %}
+            {{ as_datetime(alarm_val) }}
+          {% else %}
+            none
+          {% endif %}
+
+        # Start datetime today
+        start_dt: >
+          {{ now().replace(hour=start.split(':')[0]|int, minute=start.split(':')[1]|int, second=0, microsecond=0) }}
+
+        # End datetime
+        end_dt: >
+          {% if next_alarm != none and next_alarm < now() %}
+            {{ next_alarm + timedelta(days=1) }}
+          {% else %}
+            {{ next_alarm }}
+          {% endif %}
+
+        # Initial time window check
+        time_ok: >
+          {% if end_dt != none %}
+            {{ now() >= start_dt and now() <= end_dt }}
+          {% else %}
+            false
+          {% endif %}
+
+    - choose:
+        # Turn ON after grace period if conditions still hold
+        - conditions:
+            - condition: template
+              value_template: "{{ any_charging and time_ok }}"
+          sequence:
+            - delay:
+                minutes: "{{ grace }}"
+            - variables:
+                # Re-check charging condition
+                matching_devices_after: >
+                  {% set list = [] %}
+                  {% for dev in devices %}
+                    {% set state = state_attr(dev, charge_attr) %}
+                    {% set state_bool = state in [true, 'true', 'on'] %}
+                    {% set ctype = state_attr(dev, type_attr) %}
+                    {% if state_bool %}
+                      {% if type_filter == 'any' or (ctype is not none and ctype|lower == type_filter) %}
+                        {% set _ = list.append(dev) %}
+                      {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ list }}
+                any_charging_after: "{{ matching_devices_after|length > 0 }}"
+
+                # Recalculate time window after delay
+                now_dt: "{{ now() }}"
+                time_ok_after: >
+                  {% if end_dt != none %}
+                    {{ now_dt >= start_dt and now_dt <= end_dt }}
+                  {% else %}
+                    false
+                  {% endif %}
+            - condition: template
+              value_template: "{{ any_charging_after and time_ok_after }}"
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "{{ helper }}"
+
+        # Turn OFF if not charging or time window expired
+        - conditions:
+            - condition: template
+              value_template: "{{ not any_charging or not time_ok }}"
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: "{{ helper }}"
+
+mode: restart
