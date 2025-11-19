@@ -1,9 +1,8 @@
 blueprint:
-  name: Presence Light with Dual Manual Overrides + Stabilization (Tuya RD24G01)
+  name: Presence Light with Dual Manual Overrides (Tuya RD24G01)
   description: >
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
-    Includes presence stabilization to prevent flicker.
     Optional disable sensor stops automation entirely.
   domain: automation
 
@@ -68,18 +67,6 @@ blueprint:
         entity:
           domain: binary_sensor
 
-    presence_on_stable:
-      name: Presence ON Stabilization (HH:MM:SS)
-      default: "00:00:01"
-      selector:
-        text: {}
-
-    presence_off_stable:
-      name: Presence OFF Stabilization (HH:MM:SS)
-      default: "00:00:08"
-      selector:
-        text: {}
-
 trigger:
   - platform: state
     entity_id: !input presence_sensor
@@ -97,8 +84,6 @@ action:
       off_minutes: !input manual_off_minutes
       disable_sensor: !input disable_sensor
       active_states: ["motion", "stationary"]
-      presence_on_stable: !input presence_on_stable
-      presence_off_stable: !input presence_off_stable
 
   ###########################################################################
   # 1 — Optional disable sensor
@@ -129,7 +114,6 @@ action:
               - platform: state
                 entity_id: !input presence_sensor
                 to: "none"
-                for: !input presence_off_stable
           - delay:
               minutes: !input manual_on_minutes
           - service: input_boolean.turn_off
@@ -155,7 +139,6 @@ action:
               - platform: state
                 entity_id: !input presence_sensor
                 to: "none"
-                for: !input presence_off_stable
           - delay:
               minutes: !input manual_off_minutes
           - service: input_boolean.turn_off
@@ -164,7 +147,7 @@ action:
           - stop:
 
   ###########################################################################
-  # 4 — Auto ON (blocked by OFF override, with presence stabilization)
+  # 4 — Auto ON (blocked by OFF override)
   ###########################################################################
   - choose:
       - conditions:
@@ -175,16 +158,12 @@ action:
                  and trigger.from_state.state == 'none'
                  and trigger.to_state.state in active_states }}
         sequence:
-          - delay: !input presence_on_stable
-          - condition: template
-            value_template: >
-              {{ states(sensor) in active_states }}
           - service: light.turn_on
             target:
               entity_id: !input target_lights
 
   ###########################################################################
-  # 5 — Auto OFF (blocked by ON override, with presence stabilization)
+  # 5 — Auto OFF (blocked by ON override)
   ###########################################################################
   - choose:
       - conditions:
@@ -195,7 +174,6 @@ action:
                  and trigger.to_state.state == 'none'
                  and states(sensor) not in active_states }}
         sequence:
-          - delay: !input presence_off_stable
           - delay:
               seconds: !input off_delay
           - condition: state
