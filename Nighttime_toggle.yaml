@@ -1,15 +1,13 @@
 blueprint:
-  name: Charging + Time Window Helper (Fully Robust)
+  name: Charging + Time Window Helper (Blueprint Compliant)
   description: >
-    Toggles a boolean helper when one or more selected devices are charging
-    and the current time is between a configurable start time and the next alarm
-    of a selected device.
-    Supports a grace period and filtering by charging type (wired/wireless).
+    Toggle a helper boolean when one or more devices are charging
+    and the current time is between a start time and the next alarm.
+    Supports a grace period and optional charging type filtering.
 
   domain: automation
 
   input:
-
     charging_devices:
       name: Devices to Monitor
       selector:
@@ -78,90 +76,32 @@ blueprint:
       entity_id: !input alarm_device
 
   action:
-    - variables:
-        devices: !input charging_devices
-        charge_attr: !input charging_attribute
-        type_attr: !input charging_type_attribute
-        type_filter: !input charging_type_filter
-        start: !input start_time
-        alarm: !input alarm_device
-        helper: !input helper_boolean
-        grace: !input grace_period
-
     - choose:
         - conditions:
             - condition: template
               value_template: >
-                {% set matching_devices = [] %}
-                {% for dev in devices %}
-                  {% set state = state_attr(dev, charge_attr) %}
+                {% set any_charging = false %}
+                {% for dev in expand('!input charging_devices') %}
+                  {% set state = state_attr(dev.entity_id, '!input charging_attribute') %}
                   {% set state_bool = state in [true, 'true', 'on'] %}
-                  {% set ctype = state_attr(dev, type_attr) %}
-                  {% if state_bool %}
-                    {% if type_filter == 'any' or (ctype is not none and ctype|lower == type_filter) %}
-                      {% set _ = matching_devices.append(dev) %}
-                    {% endif %}
+                  {% set ctype = state_attr(dev.entity_id, '!input charging_type_attribute') %}
+                  {% if state_bool and ('!input charging_type_filter' == 'any' or (ctype is not none and ctype|lower == '!input charging_type_filter')) %}
+                    {% set any_charging = true %}
                   {% endif %}
                 {% endfor %}
-                {% set any_charging = matching_devices|length > 0 %}
 
-                {# Compute start datetime today #}
-                {% set start_dt = now().replace(hour=start.split(':')[0]|int, minute=start.split(':')[1]|int, second=0, microsecond=0) %}
+                {% set start_dt = now().replace(hour='!input start_time'.split(':')[0]|int, minute='!input start_time'.split(':')[1]|int, second=0, microsecond=0) %}
+                {% set alarm_val = states('!input alarm_device') %}
+                {% set end_dt = alarm_val != 'unknown' and alarm_val != '' and alarm_val != 'unavailable' and as_datetime(alarm_val) or none %}
+                {% if end_dt != none and end_dt < now() %}{% set end_dt = end_dt + timedelta(days=1) %}{% endif %}
 
-                {# Compute end datetime from alarm #}
-                {% set alarm_val = states(alarm).state %}
-                {% if alarm_val not in ['', 'unknown', 'unavailable'] %}
-                  {% set end_dt = as_datetime(alarm_val) %}
-                  {% if end_dt < now() %}
-                    {% set end_dt = end_dt + timedelta(days=1) %}
-                  {% endif %}
-                {% else %}
-                  {% set end_dt = none %}
-                {% endif %}
-
-                {% set time_ok = end_dt is not none and now() >= start_dt and now() <= end_dt %}
-
-                {{ any_charging and time_ok }}
+                {{ any_charging and end_dt != none and now() >= start_dt and now() <= end_dt }}
           sequence:
             - delay:
-                minutes: "{{ grace }}"
-            - variables:
-                # Re-check after grace period
-                matching_devices_after: >
-                  {% set list = [] %}
-                  {% for dev in devices %}
-                    {% set state = state_attr(dev, charge_attr) %}
-                    {% set state_bool = state in [true, 'true', 'on'] %}
-                    {% set ctype = state_attr(dev, type_attr) %}
-                    {% if state_bool %}
-                      {% if type_filter == 'any' or (ctype is not none and ctype|lower == type_filter) %}
-                        {% set _ = list.append(dev) %}
-                      {% endif %}
-                    {% endif %}
-                  {% endfor %}
-                  {{ list }}
-                any_charging_after: "{{ matching_devices_after|length > 0 }}"
-
-                # Recalculate time window
-                now_dt: "{{ now() }}"
-                start_dt_after: "{{ now_dt.replace(hour=start.split(':')[0]|int, minute=start.split(':')[1]|int, second=0, microsecond=0) }}"
-                {% set alarm_val = states(alarm).state %}
-                {% if alarm_val not in ['', 'unknown', 'unavailable'] %}
-                  {% set end_dt_after = as_datetime(alarm_val) %}
-                  {% if end_dt_after < now_dt %}
-                    {% set end_dt_after = end_dt_after + timedelta(days=1) %}
-                  {% endif %}
-                {% else %}
-                  {% set end_dt_after = none %}
-                {% endif %}
-                time_ok_after: "{{ end_dt_after is not none and now_dt >= start_dt_after and now_dt <= end_dt_after }}"
-
-            - condition: template
-              value_template: "{{ any_charging_after and time_ok_after }}"
+                minutes: !input grace_period
             - service: input_boolean.turn_on
               target:
                 entity_id: !input helper_boolean
-
         - default:
             - service: input_boolean.turn_off
               target:
