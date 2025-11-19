@@ -175,13 +175,10 @@ action:
                  and trigger.from_state.state == 'none'
                  and trigger.to_state.state in active_states }}
         sequence:
-          - wait_for_trigger:
-              - platform: state
-                entity_id: !input presence_sensor
-                to:
-                  - "motion"
-                  - "stationary"
-                for: !input presence_on_stable
+          - delay: !input presence_on_stable
+          - condition: template
+            value_template: >
+              {{ states(sensor) in active_states }}
           - service: light.turn_on
             target:
               entity_id: !input target_lights
@@ -198,11 +195,7 @@ action:
                  and trigger.to_state.state == 'none'
                  and states(sensor) not in active_states }}
         sequence:
-          - wait_for_trigger:
-              - platform: state
-                entity_id: !input presence_sensor
-                to: "none"
-                for: !input presence_off_stable
+          - delay: !input presence_off_stable
           - delay:
               seconds: !input off_delay
           - condition: state
