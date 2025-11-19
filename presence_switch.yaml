@@ -1,0 +1,259 @@
+blueprint:
+  name: Presence Light with Dual Manual Overrides and Optional Disable Sensor
+  description: >
+    Controls light(s) based on presence sensor states (none/motion/stationary).
+    Includes dual manual override logic:
+      - Manual ON → prevents automation from turning lights off.
+      - Manual OFF → prevents automation from turning lights on.
+    Each override has its own expiration timer.
+    Optional disable sensor can pause the automation entirely.
+
+  domain: automation
+
+  input:
+    presence_sensor:
+      name: Presence Sensor
+      selector:
+        entity:
+          domain: sensor
+
+    target_lights:
+      name: Lights to Control (multi-select)
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    off_delay:
+      name: Delay before auto-off (seconds)
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 600
+          unit_of_measurement: seconds
+
+    manual_on_override_minutes:
+      name: Manual ON Override Duration (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          mode: slider
+          unit_of_measurement: minutes
+
+    manual_off_override_minutes:
+      name: Manual OFF Override Duration (minutes)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 120
+          mode: slider
+          unit_of_measurement: minutes
+
+    disable_sensor:
+      name: Optional Disable Sensor
+      description: "If ON, automation is disabled"
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: false
+          optional: true
+
+
+trigger:
+  - platform: state
+    entity_id: !input presence_sensor
+
+  # Detect manual user-interaction with any light
+  - platform: state
+    entity_id: !input target_lights
+
+
+variables:
+  sensor: !input presence_sensor
+  lights: !input target_lights
+  off_delay: !input off_delay
+  disable_sensor: !input disable_sensor
+
+  on_minutes: !input manual_on_override_minutes
+  off_minutes: !input manual_off_override_minutes
+
+  # Helper entity names
+  override_on_flag: "{{ 'input_boolean.' ~ this.entity_id.split('.')[-1] ~ '_on_override' }}"
+  override_off_flag: "{{ 'input_boolean.' ~ this.entity_id.split('.')[-1] ~ '_off_override' }}"
+  override_on_until: "{{ 'input_datetime.' ~ this.entity_id.split('.')[-1] ~ '_on_until' }}"
+  override_off_until: "{{ 'input_datetime.' ~ this.entity_id.split('.')[-1] ~ '_off_until' }}"
+
+
+condition: []
+
+
+action:
+
+  ###########################################################################
+  # 0 — Ensure helper entities exist
+  ###########################################################################
+  - repeat:
+      for_each:
+        - flag: "{{ override_on_flag }}"
+          type: input_boolean
+        - flag: "{{ override_off_flag }}"
+          type: input_boolean
+      sequence:
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ states(item.flag) in ['unknown', 'unavailable'] }}"
+              sequence:
+                - service: input_boolean.create
+                  data:
+                    name: "{{ item.flag.split('.')[-1] | replace('_',' ') | title }}"
+                    entity_id: "{{ item.flag.split('.')[-1] }}"
+
+  - repeat:
+      for_each:
+        - time: "{{ override_on_until }}"
+        - time: "{{ override_off_until }}"
+      sequence:
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ states(item.time) in ['unknown','unavailable'] }}"
+              sequence:
+                - service: input_datetime.create
+                  data:
+                    name: "{{ item.time.split('.')[-1] | replace('_',' ') | title }}"
+                    entity_id: "{{ item.time.split('.')[-1] }}"
+                    has_date: true
+                    has_time: true
+
+  ###########################################################################
+  # 1 — Optional disable sensor
+  ###########################################################################
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ disable_sensor|length > 0
+                 and is_state(disable_sensor, 'on') }}
+        sequence:
+          - stop: "Automation disabled via disable sensor."
+
+
+  ###########################################################################
+  # 2 — Detect MANUAL LIGHT CONTROL
+  ###########################################################################
+  - choose:
+
+      #######################################################################
+      # Manual ON override
+      #######################################################################
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.entity_id in lights
+                 and trigger.to_state.state == 'on'
+                 and trigger.to_state.context.user_id is not none }}
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: "{{ override_on_flag }}"
+
+          # Only start timer when presence = none
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: "{{ sensor }}"
+                    state: "none"
+                sequence:
+                  - service: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ override_on_until }}"
+                    data:
+                      datetime: "{{ (now() + timedelta(minutes=on_minutes)).isoformat() }}"
+
+          - stop: "Manual ON override engaged."
+
+      #######################################################################
+      # Manual OFF override
+      #######################################################################
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.entity_id in lights
+                 and trigger.to_state.state == 'off'
+                 and trigger.to_state.context.user_id is not none }}
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: "{{ override_off_flag }}"
+
+          # Only start timer when presence = none
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: "{{ sensor }}"
+                    state: "none"
+                sequence:
+                  - service: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ override_off_until }}"
+                    data:
+                      datetime: "{{ (now() + timedelta(minutes=off_minutes)).isoformat() }}"
+
+          - stop: "Manual OFF override engaged."
+
+
+  ###########################################################################
+  # 3 — Expire overrides when presence returns to NONE
+  ###########################################################################
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.entity_id == sensor and trigger.to_state.state == 'none' }}"
+        sequence:
+
+          # Extend ON override timer if active
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: "{{ override_on_flag }}"
+                    state: "on"
+                sequence:
+                  - service: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ override_on_until }}"
+                    data:
+                      datetime: "{{ (now() + timedelta(minutes=on_minutes)).isoformat() }}"
+
+          # Extend OFF override timer if active
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: "{{ override_off_flag }}"
+                    state: "on"
+                sequence:
+                  - service: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ override_off_until }}"
+                    data:
+                      datetime: "{{ (now() + timedelta(minutes=off_minutes)).isoformat() }}"
+
+  ###########################################################################
+  # 4 — Override expiration check
+  ###########################################################################
+  - choose:
+      # Expire manual ON
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ is_state(override_on_flag, 'on')
+                 and now() > as_datetime(states(override_on_until)) }}
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              e
