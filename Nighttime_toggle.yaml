@@ -1,9 +1,9 @@
 blueprint:
-  name: Charging + Time Window Helper (Blueprint Compliant)
+  name: Charging + Time Window Helper (Importable)
   description: >
     Toggle a helper boolean when one or more devices are charging
     and the current time is between a start time and the next alarm.
-    Supports a grace period and optional charging type filtering.
+    Supports a grace period and charging type filtering.
 
   domain: automation
 
@@ -68,8 +68,7 @@ blueprint:
           domain: input_boolean
 
   trigger:
-    - platform: state
-      entity_id: !input charging_devices
+    # We cannot trigger directly on multi-select; rely on time + alarm updates
     - platform: time_pattern
       minutes: "/1"
     - platform: state
@@ -81,18 +80,18 @@ blueprint:
             - condition: template
               value_template: >
                 {% set any_charging = false %}
-                {% for dev in expand('!input charging_devices') %}
-                  {% set state = state_attr(dev.entity_id, '!input charging_attribute') %}
+                {% for dev in expand(!input charging_devices) %}
+                  {% set state = state_attr(dev.entity_id, !input charging_attribute) %}
                   {% set state_bool = state in [true, 'true', 'on'] %}
-                  {% set ctype = state_attr(dev.entity_id, '!input charging_type_attribute') %}
-                  {% if state_bool and ('!input charging_type_filter' == 'any' or (ctype is not none and ctype|lower == '!input charging_type_filter')) %}
+                  {% set ctype = state_attr(dev.entity_id, !input charging_type_attribute) %}
+                  {% if state_bool and (!input charging_type_filter == 'any' or (ctype is not none and ctype|lower == !input charging_type_filter)) %}
                     {% set any_charging = true %}
                   {% endif %}
                 {% endfor %}
 
-                {% set start_dt = now().replace(hour='!input start_time'.split(':')[0]|int, minute='!input start_time'.split(':')[1]|int, second=0, microsecond=0) %}
-                {% set alarm_val = states('!input alarm_device') %}
-                {% set end_dt = alarm_val != 'unknown' and alarm_val != '' and alarm_val != 'unavailable' and as_datetime(alarm_val) or none %}
+                {% set start_dt = now().replace(hour=!input start_time.split(':')[0]|int, minute=!input start_time.split(':')[1]|int, second=0, microsecond=0) %}
+                {% set alarm_val = states(!input alarm_device) %}
+                {% set end_dt = alarm_val not in ['', 'unknown', 'unavailable'] and as_datetime(alarm_val) or none %}
                 {% if end_dt != none and end_dt < now() %}{% set end_dt = end_dt + timedelta(days=1) %}{% endif %}
 
                 {{ any_charging and end_dt != none and now() >= start_dt and now() <= end_dt }}
