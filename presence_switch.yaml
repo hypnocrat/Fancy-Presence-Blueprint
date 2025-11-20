@@ -4,7 +4,6 @@ blueprint:
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
     Optional disable sensor stops automation entirely.
-    Only triggers between sunset and sunrise with customizable offset.
   domain: automation
 
   input:
@@ -68,24 +67,6 @@ blueprint:
         entity:
           domain: binary_sensor
 
-    sunset_offset:
-      name: Sunset Offset (minutes)
-      default: 0
-      selector:
-        number:
-          min: -120
-          max: 120
-          unit_of_measurement: minutes
-
-    sunrise_offset:
-      name: Sunrise Offset (minutes)
-      default: 0
-      selector:
-        number:
-          min: -120
-          max: 120
-          unit_of_measurement: minutes
-
 trigger:
   - platform: state
     entity_id: !input presence_sensor
@@ -103,27 +84,6 @@ action:
       off_minutes: !input manual_off_minutes
       disable_sensor: !input disable_sensor
       active_states: ["motion", "stationary"]
-
-  ###########################################################################
-  # 0 — Only run between sunset and sunrise (with offsets)
-  ###########################################################################
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
-              {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
-              {%- set start_time = (sunrise() + timedelta(seconds=sunrise_offset_sec)).strftime('%H:%M:%S') %}
-              {%- set end_time = (sunset() + timedelta(seconds=sunset_offset_sec)).strftime('%H:%M:%S') %}
-              {{ start_time < end_time and now().strftime('%H:%M:%S') > end_time and now().strftime('%H:%M:%S') < start_time
-                 or
-                 start_time >= end_time and (now().strftime('%H:%M:%S') > end_time or now().strftime('%H:%M:%S') < start_time) }}
-        sequence:
-          - service: homeassistant.log
-            data:
-              message: "Automation triggered during the correct time window."
-    default:
-      - stop:
 
   ###########################################################################
   # 1 — Optional disable sensor
