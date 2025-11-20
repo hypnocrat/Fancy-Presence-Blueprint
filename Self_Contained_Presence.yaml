@@ -69,6 +69,26 @@ blueprint:
         entity:
           domain: binary_sensor
 
+    sunset_offset:
+      name: Sunset Offset (minutes)
+      description: Offset the start of the time window. Use a negative number to start before sunset.
+      default: 0
+      selector:
+        number:
+          min: -120
+          max: 120
+          unit_of_measurement: minutes
+
+    sunrise_offset:
+      name: Sunrise Offset (minutes)
+      description: Offset the end of the time window. Use a positive number to end after sunrise.
+      default: 0
+      selector:
+        number:
+          min: -120
+          max: 120
+          unit_of_measurement: minutes
+
 trigger:
   - platform: state
     entity_id: !input presence_sensor
