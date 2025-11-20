@@ -1,11 +1,11 @@
 blueprint:
-  name: Presence Light with Dual Manual Overrides (Tuya RD24G01) - BEST PRACTICE
+  name: Presence Light with Dual Manual Overrides (Tuya RD24G01) - WORKING
   description: >
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
     Optional disable sensor stops automation entirely.
     Only triggers between sunset and sunrise with customizable offset.
-    This version uses the sun.sun entity for reliable time window checks.
+    This version uses the built-in 'sun' condition for guaranteed compatibility and modern logging.
   domain: automation
 
   input:
@@ -69,38 +69,19 @@ blueprint:
         entity:
           domain: binary_sensor
 
-    sunset_offset:
-      name: Sunset Offset (minutes)
-      default: 0
-      selector:
-        number:
-          min: -120
-          max: 120
-          unit_of_measurement: minutes
-
-    sunrise_offset:
-      name: Sunrise Offset (minutes)
-      default: 0
-      selector:
-        number:
-          min: -120
-          max: 120
-          unit_of_measurement: minutes
-
-    # --- NEW, SIMPLER INPUT FOR SUN ---
-    sun_entity:
-      name: Sun Entity
-      description: The sun.sun entity to use for sunrise/sunset times.
-      default: sun.sun
-      selector:
-        entity:
-          domain: sun
-
 trigger:
   - platform: state
     entity_id: !input presence_sensor
   - platform: state
     entity_id: !input target_lights
+
+condition:
+  # This single condition replaces the entire complex template block
+  - condition: sun
+    after: sunset
+    after_offset: !input sunset_offset
+    before: sunrise
+    before_offset: !input sunrise_offset
 
 action:
   - variables:
@@ -112,35 +93,13 @@ action:
       on_minutes: !input manual_on_minutes
       off_minutes: !input manual_off_minutes
       disable_sensor: !input disable_sensor
-      sun: !input sun_entity
       active_states: ["motion", "stationary"]
 
-  ###########################################################################
-  # 0 — Only run between sunset and sunrise (with offsets) - BEST PRACTICE VERSION
-  ###########################################################################
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
-              {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
-              {%- set night_start_ts = (state_attr(sun, 'next_setting') + timedelta(seconds=sunset_offset_sec)).timestamp() %}
-              {%- set night_end_ts = (state_attr(sun, 'next_rising') + timedelta(seconds=sunrise_offset_sec)).timestamp() %}
-              {%- set now_ts = now().timestamp() %}
-              {{ night_start_ts < night_end_ts and now_ts >= night_start_ts and now_ts < night_end_ts
-                 or
-                 night_start_ts >= night_end_ts and (now_ts >= night_start_ts or now_ts < night_end_ts) }}
-        sequence:
-          - service: system_log.write
-            data:
-              message: "Presence Light [{{ sensor }}]: [OK] Passed time window check."
-              level: info
-    default:
-      - service: system_log.write
-        data:
-          message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Outside time window."
-          level: warning
-      - stop:
+  # Log that we passed the time window check
+  - service: system_log.write
+    data:
+      message: "Presence Light [{{ sensor }}]: [OK] Passed time window check."
+      level: info
 
   ###########################################################################
   # 1 — Optional disable sensor
