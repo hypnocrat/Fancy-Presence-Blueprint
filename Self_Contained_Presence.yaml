@@ -117,20 +117,24 @@ action:
       level: info
 
   ###########################################################################
-  # 0 — Only run between sunset and sunrise (with offsets) - CORRECTED
+  # 0 — Only run between sunset and sunrise (with offsets) - FINAL CORRECTED VERSION
   ###########################################################################
+  - variables:
+      # Calculate the time window check here, where functions are available
+      sunset_offset_sec: "{{ (sunset_offset | int(0)) * 60 }}"
+      sunrise_offset_sec: "{{ (sunrise_offset | int(0)) * 60 }}"
+      night_start_ts: "{{ (sunset() + timedelta(seconds=sunset_offset_sec)).timestamp() }}"
+      night_end_ts: "{{ (sunrise() + timedelta(seconds=sunrise_offset_sec)).timestamp() }}"
+      now_ts: "{{ now().timestamp() }}"
+      is_night_time: >
+        {{ night_start_ts < night_end_ts and now_ts >= night_start_ts and now_ts < night_end_ts
+           or
+           night_start_ts >= night_end_ts and (now_ts >= night_start_ts or now_ts < night_end_ts) }}
+
   - choose:
       - conditions:
           - condition: template
-            value_template: >
-              {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
-              {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
-              {%- set night_start = (sunset() + timedelta(seconds=sunset_offset_sec)).timestamp() %}
-              {%- set night_end = (sunrise() + timedelta(seconds=sunrise_offset_sec)).timestamp() %}
-              {%- set now_ts = now().timestamp() %}
-              {{ night_start < night_end and now_ts >= night_start and now_ts < night_end
-                 or
-                 night_start >= night_end and (now_ts >= night_start or now_ts < night_end) }}
+            value_template: "{{ is_night_time }}" # Simple variable check
         sequence:
           - service: system_log.write
             data:
@@ -140,6 +144,7 @@ action:
       - service: system_log.write
         data:
           message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Outside time window."
+          level: warning
       - stop:
       
   ###########################################################################
