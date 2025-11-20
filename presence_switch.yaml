@@ -213,8 +213,9 @@ action:
             after_offset: "00:{{ sunset_offset | int }}:00"
             before_offset: "00:{{ sunrise_offset | int }}:00"
         sequence:
-          - continue:
-              sequence:
-                # The rest of your actions here
+          - service: homeassistant.turn_on
+            target:
+              entity_id: automation.presence_light_with_dual_manual_overrides_tuya_rd24g01
+
 mode: queued
 max: 20
