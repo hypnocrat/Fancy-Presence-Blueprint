@@ -111,9 +111,10 @@ action:
       active_states: ["motion", "stationary"]
 
   # Initial log entry
-  - service: homeassistant.log
+  - service: system_log.write
     data:
       message: "Presence Light [{{ sensor }}]: Triggered by {{ trigger.entity_id }} from {{ trigger.from_state.state }} to {{ trigger.to_state.state }}."
+      level: info
 
   ###########################################################################
   # 0 — Only run between sunset and sunrise (with offsets)
@@ -133,13 +134,15 @@ action:
                 {{ now_obj > end_time_obj and now_obj < start_time_obj }}
               {%- endif %}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [OK] Passed time window check."
+              level: info
     default:
-      - service: homeassistant.log
+      - service: system_log.write
         data:
           message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Outside time window."
+          level: warning
       - stop:
 
   ###########################################################################
@@ -151,13 +154,15 @@ action:
             value_template: >
               {{ disable_sensor != "" and is_state(disable_sensor, 'on') }}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Disable sensor '{{ disable_sensor }}' is ON."
+              level: warning
           - stop:
-  - service: homeassistant.log
+  - service: system_log.write
     data:
       message: "Presence Light [{{ sensor }}]: [OK] Passed disable sensor check."
+      level: info
 
   ###########################################################################
   # 2 — Manual ON override
@@ -170,9 +175,10 @@ action:
                  and trigger.to_state.state == 'on'
                  and trigger.to_state.context.user_id is not none }}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [INFO] Manual ON override triggered. Activating flag and stopping automation."
+              level: info
           - service: input_boolean.turn_on
             target:
               entity_id: !input manual_on_override_flag
@@ -197,9 +203,10 @@ action:
                  and trigger.to_state.state == 'off'
                  and trigger.to_state.context.user_id is not none }}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [INFO] Manual OFF override triggered. Activating flag and stopping automation."
+              level: info
           - service: input_boolean.turn_on
             target:
               entity_id: !input manual_off_override_flag
@@ -212,9 +219,10 @@ action:
             target:
               entity_id: !input manual_off_override_flag
           - stop:
-  - service: homeassistant.log
+  - service: system_log.write
     data:
       message: "Presence Light [{{ sensor }}]: [OK] Passed manual override checks."
+      level: info
 
   ###########################################################################
   # 4 — Auto ON (blocked by OFF override)
@@ -228,16 +236,18 @@ action:
                  and trigger.from_state.state == 'none'
                  and trigger.to_state.state in active_states }}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [OK] Auto-ON condition met. Turning lights on."
+              level: info
           - service: light.turn_on
             target:
               entity_id: !input target_lights
     default:
-      - service: homeassistant.log
+      - service: system_log.write
         data:
           message: "Presence Light [{{ sensor }}]: [FAIL] Auto-ON condition NOT met. Details: OFF_Flag_is_off={{ is_state(off_flag, 'off') }}, Trigger_is_sensor={{ trigger.entity_id == sensor }}, FromState_was_none={{ trigger.from_state.state == 'none' }}, ToState_is_active={{ trigger.to_state.state in active_states }}"
+          level: warning
 
   ###########################################################################
   # 5 — Auto OFF (blocked by ON override)
@@ -251,23 +261,26 @@ action:
                  and trigger.to_state.state == 'none'
                  and states(sensor) not in active_states }}
         sequence:
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [OK] Auto-OFF condition met. Starting delay."
+              level: info
           - delay:
               seconds: !input off_delay
           - condition: template
             value_template: "{{ is_state(sensor, 'none') }}"
-          - service: homeassistant.log
+          - service: system_log.write
             data:
               message: "Presence Light [{{ sensor }}]: [OK] Delay finished. Sensor still 'none'. Turning lights off."
+              level: info
           - service: light.turn_off
             target:
               entity_id: !input target_lights
     default:
-      - service: homeassistant.log
+      - service: system_log.write
         data:
           message: "Presence Light [{{ sensor }}]: [FAIL] Auto-OFF condition NOT met."
+          level: warning
 
 mode: queued
 max: 20
