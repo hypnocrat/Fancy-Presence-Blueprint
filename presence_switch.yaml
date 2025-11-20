@@ -105,6 +105,20 @@ action:
       active_states: ["motion", "stationary"]
 
   ###########################################################################
+  # 0 — Only run between sunset and sunrise (with offsets)
+  ###########################################################################
+  - choose:
+      - conditions:
+          - condition: sun
+            after: sunset
+            after_offset: "{{ (sunset_offset | int) * 60 }}"
+            before: sunrise
+            before_offset: "{{ (sunrise_offset | int) * 60 }}"
+        sequence: []
+    default:
+      - stop
+
+  ###########################################################################
   # 1 — Optional disable sensor
   ###########################################################################
   - choose:
@@ -201,21 +215,6 @@ action:
           - service: light.turn_off
             target:
               entity_id: !input target_lights
-
-  ###########################################################################
-  # 6 — Only trigger between sunset and sunrise (with offset)
-  ###########################################################################
-  - choose:
-      - conditions:
-          - condition: sun
-            after: sunset
-            before: sunrise
-            after_offset: "00:{{ sunset_offset | int }}:00"
-            before_offset: "00:{{ sunrise_offset | int }}:00"
-        sequence:
-          - service: homeassistant.turn_on
-            target:
-              entity_id: automation.presence_light_with_dual_manual_overrides_tuya_rd24g01
 
 mode: queued
 max: 20
