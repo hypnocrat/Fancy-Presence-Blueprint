@@ -89,6 +89,14 @@ blueprint:
           max: 120
           unit_of_measurement: minutes
 
+    sun_entity:
+      name: Sun Entity
+      description: The sun entity to use for determining sunrise/sunset times.
+      default: sun.sun
+      selector:
+        entity:
+          domain: sun
+
 trigger:
   - platform: state
     entity_id: !input presence_sensor
@@ -102,6 +110,7 @@ condition:
     after_offset: !input sunset_offset
     before: sunrise
     before_offset: !input sunrise_offset
+    entity_id: !input sun_entity
 
 action:
   - variables:
@@ -113,6 +122,7 @@ action:
       on_minutes: !input manual_on_minutes
       off_minutes: !input manual_off_minutes
       disable_sensor: !input disable_sensor
+      sun: !input sun_entity
       active_states: ["motion", "stationary"]
 
   # Log that we passed the time window check
