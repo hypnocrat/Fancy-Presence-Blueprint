@@ -1,11 +1,11 @@
 blueprint:
-  name: Presence Light with Dual Manual Overrides (Tuya RD24G01) - DEBUG
+  name: Presence Light with Dual Manual Overrides (Tuya RD24G01) - BEST PRACTICE
   description: >
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
     Optional disable sensor stops automation entirely.
     Only triggers between sunset and sunrise with customizable offset.
-    This version includes extensive logging for debugging.
+    This version uses the sun.sun entity for reliable time window checks.
   domain: automation
 
   input:
@@ -87,16 +87,22 @@ blueprint:
           max: 120
           unit_of_measurement: minutes
 
-# The trigger for the automation
+    # --- NEW, SIMPLER INPUT FOR SUN ---
+    sun_entity:
+      name: Sun Entity
+      description: The sun.sun entity to use for sunrise/sunset times.
+      default: sun.sun
+      selector:
+        entity:
+          domain: sun
+
 trigger:
   - platform: state
     entity_id: !input presence_sensor
   - platform: state
     entity_id: !input target_lights
 
-# The action sequence
 action:
-  # Define variables for easy access
   - variables:
       sensor: !input presence_sensor
       lights: !input target_lights
@@ -106,35 +112,24 @@ action:
       on_minutes: !input manual_on_minutes
       off_minutes: !input manual_off_minutes
       disable_sensor: !input disable_sensor
-      sunset_offset: !input sunset_offset
-      sunrise_offset: !input sunrise_offset
+      sun: !input sun_entity
       active_states: ["motion", "stationary"]
 
-  # Initial log entry
-  - service: system_log.write
-    data:
-      message: "Presence Light [{{ sensor }}]: Triggered by {{ trigger.entity_id }} from {{ trigger.from_state.state }} to {{ trigger.to_state.state }}."
-      level: info
-
   ###########################################################################
-  # 0 — Only run between sunset and sunrise (with offsets) - FINAL CORRECTED VERSION
+  # 0 — Only run between sunset and sunrise (with offsets) - BEST PRACTICE VERSION
   ###########################################################################
-  - variables:
-      # Calculate the time window check here, where functions are available
-      sunset_offset_sec: "{{ (sunset_offset | int(0)) * 60 }}"
-      sunrise_offset_sec: "{{ (sunrise_offset | int(0)) * 60 }}"
-      night_start_ts: "{{ (sunset() + timedelta(seconds=sunset_offset_sec)).timestamp() }}"
-      night_end_ts: "{{ (sunrise() + timedelta(seconds=sunrise_offset_sec)).timestamp() }}"
-      now_ts: "{{ now().timestamp() }}"
-      is_night_time: >
-        {{ night_start_ts < night_end_ts and now_ts >= night_start_ts and now_ts < night_end_ts
-           or
-           night_start_ts >= night_end_ts and (now_ts >= night_start_ts or now_ts < night_end_ts) }}
-
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ is_night_time }}" # Simple variable check
+            value_template: >
+              {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
+              {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
+              {%- set night_start_ts = (state_attr(sun, 'next_setting') + timedelta(seconds=sunset_offset_sec)).timestamp() %}
+              {%- set night_end_ts = (state_attr(sun, 'next_rising') + timedelta(seconds=sunrise_offset_sec)).timestamp() %}
+              {%- set now_ts = now().timestamp() %}
+              {{ night_start_ts < night_end_ts and now_ts >= night_start_ts and now_ts < night_end_ts
+                 or
+                 night_start_ts >= night_end_ts and (now_ts >= night_start_ts or now_ts < night_end_ts) }}
         sequence:
           - service: system_log.write
             data:
@@ -146,7 +141,7 @@ action:
           message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Outside time window."
           level: warning
       - stop:
-      
+
   ###########################################################################
   # 1 — Optional disable sensor
   ###########################################################################
