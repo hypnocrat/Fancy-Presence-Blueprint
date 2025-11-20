@@ -4,6 +4,7 @@ blueprint:
     Controls light(s) based on Tuya RD24G01 mmWave sensor.
     Implements dual manual overrides (ON/OFF) with duration timers.
     Optional disable sensor stops automation entirely.
+    Only triggers between sunset and sunrise with customizable offset.
   domain: automation
 
   input:
@@ -66,6 +67,24 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
+
+    sunset_offset:
+      name: Sunset Offset (minutes)
+      default: 0
+      selector:
+        number:
+          min: -120
+          max: 120
+          unit_of_measurement: minutes
+
+    sunrise_offset:
+      name: Sunrise Offset (minutes)
+      default: 0
+      selector:
+        number:
+          min: -120
+          max: 120
+          unit_of_measurement: minutes
 
 trigger:
   - platform: state
@@ -183,5 +202,19 @@ action:
             target:
               entity_id: !input target_lights
 
+  ###########################################################################
+  # 6 — Only trigger between sunset and sunrise (with offset)
+  ###########################################################################
+  - choose:
+      - conditions:
+          - condition: sun
+            after: sunset
+            before: sunrise
+            after_offset: "00:{{ sunset_offset | int }}:00"
+            before_offset: "00:{{ sunrise_offset | int }}:00"
+        sequence:
+          - continue:
+              sequence:
+                # The rest of your actions here
 mode: queued
 max: 20
