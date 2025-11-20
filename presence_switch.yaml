@@ -114,7 +114,10 @@ action:
             after_offset: "{{ (sunset_offset | int) * 60 }}"
             before: sunrise
             before_offset: "{{ (sunrise_offset | int) * 60 }}"
-        sequence: []
+        sequence:
+          - service: homeassistant.log
+            data:
+              message: "Automation triggered during the correct time window."
     default:
       - stop
 
