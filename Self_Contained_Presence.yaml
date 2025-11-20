@@ -117,7 +117,7 @@ action:
       level: info
 
   ###########################################################################
-  # 0 — Only run between sunset and sunrise (with offsets)
+  # 0 — Only run between sunset and sunrise (with offsets) - CORRECTED
   ###########################################################################
   - choose:
       - conditions:
@@ -125,14 +125,12 @@ action:
             value_template: >
               {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
               {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
-              {%- set start_time_obj = sunrise() + timedelta(seconds=sunrise_offset_sec) %}
-              {%- set end_time_obj = sunset() + timedelta(seconds=sunset_offset_sec) %}
-              {%- set now_obj = now() %}
-              {%- if start_time_obj < end_time_obj %}
-                {{ now_obj > end_time_obj or now_obj < start_time_obj }}
-              {%- else %}
-                {{ now_obj > end_time_obj and now_obj < start_time_obj }}
-              {%- endif %}
+              {%- set night_start = (sunset() + timedelta(seconds=sunset_offset_sec)).timestamp() %}
+              {%- set night_end = (sunrise() + timedelta(seconds=sunrise_offset_sec)).timestamp() %}
+              {%- set now_ts = now().timestamp() %}
+              {{ night_start < night_end and now_ts >= night_start and now_ts < night_end
+                 or
+                 night_start >= night_end and (now_ts >= night_start or now_ts < night_end) }}
         sequence:
           - service: system_log.write
             data:
@@ -142,9 +140,8 @@ action:
       - service: system_log.write
         data:
           message: "Presence Light [{{ sensor }}]: [FAIL] Stopped. Outside time window."
-          level: warning
       - stop:
-
+      
   ###########################################################################
   # 1 — Optional disable sensor
   ###########################################################################
