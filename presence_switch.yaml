@@ -109,11 +109,15 @@ action:
   ###########################################################################
   - choose:
       - conditions:
-          - condition: sun
-            after: sunset
-            after_offset: "{{ (sunset_offset | int) * 60 }}"
-            before: sunrise
-            before_offset: "{{ (sunrise_offset | int) * 60 }}"
+          - condition: template
+            value_template: >
+              {%- set sunset_offset_sec = (sunset_offset | int(0)) * 60 %}
+              {%- set sunrise_offset_sec = (sunrise_offset | int(0)) * 60 %}
+              {%- set start_time = (sunrise() + timedelta(seconds=sunrise_offset_sec)).strftime('%H:%M:%S') %}
+              {%- set end_time = (sunset() + timedelta(seconds=sunset_offset_sec)).strftime('%H:%M:%S') %}
+              {{ start_time < end_time and now().strftime('%H:%M:%S') > end_time and now().strftime('%H:%M:%S') < start_time
+                 or
+                 start_time >= end_time and (now().strftime('%H:%M:%S') > end_time or now().strftime('%H:%M:%S') < start_time) }}
         sequence:
           - service: homeassistant.log
             data:
