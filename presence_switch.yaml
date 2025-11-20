@@ -1,87 +1,3 @@
-
-No, this blueprint will not run as-is in Home Assistant. It contains a critical syntax error in the Auto-ON section.
-
-### The Error
-
-The error is in **Section 4 — Auto ON (blocked by OFF override)**. You have defined a variable named `off_flag`:
-
-```yaml
-  - variables:
-      # ...
-      off_flag: !input manual_off_override_flag
-      # ...
-```
-
-However, in the condition for the Auto-ON block, you have used `off_flag` directly instead of the entity ID it represents. The condition `is_state()` expects the first argument to be a string containing the entity ID.
-
-**Incorrect Code:**
-```yaml
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ is_state(off_flag, 'off') # <-- SYNTAX ERROR HERE
-                 and trigger.entity_id == sensor
-                 and trigger.from_state.state == 'none'
-                 and trigger.to_state.state in active_states }}
-```
-
-Home Assistant will throw a template error because `off_flag` is not a valid entity ID. You must use the variable you defined, which holds the correct entity ID string.
-
-### The Fix
-
-You need to wrap the variable `off_flag` (and `on_flag` in the next section) in quotes to pass it as a string to the `is_state()` function.
-
-**Corrected Code for Section 4:**
-```yaml
-  ###########################################################################
-  # 4 — Auto ON (blocked by OFF override)
-  ###########################################################################
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ is_state(off_flag, 'off') # This is now correct
-                 and trigger.entity_id == sensor
-                 and trigger.from_state.state == 'none'
-                 and trigger.to_state.state in active_states }}
-        sequence:
-          - service: light.turn_on
-            target:
-              entity_id: !input target_lights
-```
-
-The same error exists in **Section 5 — Auto OFF (blocked by ON override)**.
-
-**Corrected Code for Section 5:**
-```yaml
-  ###########################################################################
-  # 5 — Auto OFF (blocked by ON override)
-  ###########################################################################
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ is_state(on_flag, 'off') # This is now correct
-                 and trigger.entity_id == sensor
-                 and trigger.to_state.state == 'none'
-                 and states(sensor) not in active_states }}
-        sequence:
-          - delay:
-              seconds: !input off_delay
-          - condition: state
-            entity_id: !input presence_sensor
-            state: "none"
-          - service: light.turn_off
-            target:
-              entity_id: !input target_lights
-```
-
-### Fully Corrected Blueprint
-
-Here is the complete, corrected blueprint that will run without syntax errors. I have applied the fixes to both sections.
-
-```yaml
 blueprint:
   name: Presence Light with Dual Manual Overrides (Tuya RD24G01)
   description: >
@@ -203,7 +119,7 @@ action:
             data:
               message: "Automation triggered during the correct time window."
     default:
-      - stop
+      - stop:
 
   ###########################################################################
   # 1 — Optional disable sensor
@@ -305,4 +221,3 @@ action:
 
 mode: queued
 max: 20
-```
